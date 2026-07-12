@@ -7,20 +7,25 @@ clone_depth: 1
 
 environment:
   RUST_BACKTRACE: 1
+  # cargo bin isn't on PATH by default on this image; add it so cargo/rustc
+  # resolve in every phase after rustup-init installs them here.
+  PATH: 'C:\Users\appveyor\.cargo\bin;%PATH%'
 
 install:
-  # Rust + MSVC target (both preinstalled on the VS2022 image; make sure they're active)
-  - cmd: rustup default stable
-  - cmd: rustup target add x86_64-pc-windows-msvc
+  # Rust is NOT preinstalled on the VS2022 image — install it via rustup-init.
+  # (This download happens on AppVeyor's machine, not the user's.)
+  - cmd: appveyor DownloadFile https://win.rustup.rs/x86_64 -FileName rustup-init.exe
+  - cmd: rustup-init.exe -y --default-toolchain stable --default-host x86_64-pc-windows-msvc --profile minimal
   - cmd: rustc --version
-  # Node 22 + pnpm via corepack (Node is preinstalled)
+  - cmd: cargo --version
+  # Node is preinstalled; enable pnpm via corepack.
   - cmd: node --version
   - cmd: corepack enable
   - cmd: corepack prepare pnpm@10 --activate
   - cmd: pnpm --version
 
 build_script:
-  # 1) Build the daemon bundles that the CLI embeds via include_str!
+  # 1) Build the daemon bundles the CLI embeds via include_str!
   - cmd: cd daemon && pnpm install --no-frozen-lockfile && pnpm run bundle && pnpm run bundle:sandbox-client && cd ..
   # 2) Build the release CLI binary (embeds the fresh daemon bundle)
   - cmd: cd cli && cargo build --release && cd ..
