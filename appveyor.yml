@@ -18,10 +18,9 @@ install:
   - cmd: rustup-init.exe -y --default-toolchain stable --default-host x86_64-pc-windows-msvc --profile minimal
   - cmd: rustc --version
   - cmd: cargo --version
-  # Node is preinstalled; enable pnpm via corepack.
+  # Node is preinstalled; corepack was dropped in Node 25, so install pnpm via npm.
   - cmd: node --version
-  - cmd: corepack enable
-  - cmd: corepack prepare pnpm@10 --activate
+  - cmd: npm install -g pnpm@10
   - cmd: pnpm --version
 
 build_script:
