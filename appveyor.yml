@@ -1,0 +1,34 @@
+# Free Windows build of dev-browser (agent-ergonomics fork) via AppVeyor.
+# Builds on AppVeyor's servers — no local download, no GitHub Actions billing.
+# Produces dev-browser-windows-x64.exe as a downloadable artifact.
+version: 0.2.8-ergo.{build}
+image: Visual Studio 2022
+clone_depth: 1
+
+environment:
+  RUST_BACKTRACE: 1
+
+install:
+  # Rust + MSVC target (both preinstalled on the VS2022 image; make sure they're active)
+  - cmd: rustup default stable
+  - cmd: rustup target add x86_64-pc-windows-msvc
+  - cmd: rustc --version
+  # Node 22 + pnpm via corepack (Node is preinstalled)
+  - cmd: node --version
+  - cmd: corepack enable
+  - cmd: corepack prepare pnpm@10 --activate
+  - cmd: pnpm --version
+
+build_script:
+  # 1) Build the daemon bundles that the CLI embeds via include_str!
+  - cmd: cd daemon && pnpm install --no-frozen-lockfile && pnpm run bundle && pnpm run bundle:sandbox-client && cd ..
+  # 2) Build the release CLI binary (embeds the fresh daemon bundle)
+  - cmd: cd cli && cargo build --release && cd ..
+  # 3) Name it the way the installer expects
+  - cmd: copy cli\target\release\dev-browser.exe dev-browser-windows-x64.exe
+
+test: off
+
+artifacts:
+  - path: dev-browser-windows-x64.exe
+    name: dev-browser-windows-x64
