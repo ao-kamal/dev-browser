@@ -20,20 +20,22 @@ Do not run `dev-browser install-skill`. That command is removed. It used to over
 
 Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
 
-`--channel chrome` launches the **installed** Google Chrome. The daemon still owns a dedicated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window. Automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`) are stripped so Google login works.
+`--channel chrome` OS-spawns official `chrome.exe` with an isolated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`, then attaches over CDP. Playwright does not launch that binary. This is not the user's daily Chrome window.
+
+Do not sign into Google inside a `--channel chrome` window (it starts with a debug port). Sign in first on official `chrome.exe` with only `--user-data-dir` pointing at that same `chrome-profile`, plus `--no-first-run` and `--no-default-browser-check`. After sign-in, close that window (cookies stay) or enable `chrome://inspect/#remote-debugging`, then use `--channel chrome`.
 
 ```bash
 dev-browser --browser my-login --channel chrome --idle-timeout 0 --timeout 60 <<'EOF'
 const page = await browser.getPage("main");
 await page.setViewportSize({ width: 1280, height: 660 });
-await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded", timeout: 45000 });
+await page.goto("https://business.google.com/locations", { waitUntil: "domcontentloaded", timeout: 45000 });
 console.log(JSON.stringify({ url: page.url(), title: await page.title() }));
 EOF
 ```
 
 `--channel msedge` is the same path for Microsoft Edge.
 
-`--connect` attaches to a Chrome the user already opened. Named pages do **not** persist across `--connect` scripts. Prefer `--channel chrome` when you need a durable isolated login. Use `--connect` only when that window is already up with remote debugging.
+`--connect` attaches to a Chrome the user already opened. Named pages do **not** persist across `--connect` scripts. Use `--connect` only when that window is already up with remote debugging.
 
 ## The canonical script
 

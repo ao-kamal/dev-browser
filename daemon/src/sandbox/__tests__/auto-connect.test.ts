@@ -153,12 +153,15 @@ function createEnoentError(filePath: string): NodeJS.ErrnoException {
 
 function createManager(
   options: {
+    allocatePort?: () => Promise<number>;
     connectOverCDP?: ReturnType<typeof vi.fn>;
     fetch?: typeof globalThis.fetch;
     homedir?: () => string;
     launchPersistentContext?: ReturnType<typeof vi.fn>;
+    pathExists?: (filePath: string) => Promise<boolean>;
     platform?: NodeJS.Platform;
     readFile?: ReturnType<typeof vi.fn>;
+    spawnInstalled?: ReturnType<typeof vi.fn>;
   } = {}
 ) {
   const connectOverCDP = options.connectOverCDP ?? vi.fn();
@@ -174,15 +177,19 @@ function createManager(
     }) as ReturnType<typeof vi.fn>);
   const launchPersistentContext =
     options.launchPersistentContext ?? (vi.fn() as ReturnType<typeof vi.fn>);
+  const spawnInstalled = options.spawnInstalled ?? vi.fn(() => ({ pid: 4242 }));
 
   const manager = new BrowserManager(path.join("/tmp", "dev-browser-auto-connect-tests"), {
+    allocatePort: options.allocatePort ?? (async () => 9333),
     connectOverCDP: connectOverCDP as never,
     fetch,
     homedir: options.homedir ?? (() => "/Users/tester"),
     launchPersistentContext: launchPersistentContext as never,
     mkdir: vi.fn(async () => undefined) as never,
+    pathExists: options.pathExists ?? (async () => true),
     platform: options.platform ?? "darwin",
     readFile: readFile as never,
+    spawnInstalled: spawnInstalled as never,
   });
 
   return {
@@ -280,15 +287,28 @@ describe("BrowserManager auto-connect", () => {
     expect(relaunchedEntry.ignoreHTTPSErrors).toBe(true);
   });
 
-  it("passes channel chrome to launch and uses a chrome-profile directory", async () => {
-    const launchPersistentContext = vi.fn(async () => {
-      const context = new MockContext();
-      const browser = new MockBrowser([context]);
-      context.setBrowser(browser);
-      return context;
-    });
+  it("OS-spawns official Chrome and attaches over CDP instead of Playwright launch", async () => {
+    const context = new MockContext();
+    const browser = new MockBrowser([context]);
+    context.setBrowser(browser);
+    const launchPersistentContext = vi.fn();
+    const spawnInstalled = vi.fn(() => ({ pid: 9001 }));
+    const connectOverCDP = vi.fn(async () => browser);
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/browser/isolated-chrome",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof globalThis.fetch;
+
     const { manager } = createManager({
+      connectOverCDP,
+      fetch,
       launchPersistentContext,
+      spawnInstalled,
+      platform: "darwin",
     });
 
     const firstEntry = await manager.ensureBrowser("launched", {
@@ -296,46 +316,49 @@ describe("BrowserManager auto-connect", () => {
     });
     const reusedEntry = await manager.ensureBrowser("launched");
 
-    expect(launchPersistentContext).toHaveBeenCalledTimes(1);
-    expect(launchPersistentContext).toHaveBeenNthCalledWith(
-      1,
-      path.join("/tmp/dev-browser-auto-connect-tests", "launched", "chrome-profile"),
-      expect.objectContaining({
-        channel: "chrome",
-        headless: false,
-        ignoreDefaultArgs: expect.arrayContaining(["--enable-automation", "--disable-sync"]),
-        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
-      })
-    );
+    expect(launchPersistentContext).not.toHaveBeenCalled();
+    expect(spawnInstalled).toHaveBeenCalledTimes(1);
+    expect(spawnInstalled).toHaveBeenCalledWith({
+      executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      args: expect.arrayContaining([
+        `--user-data-dir=${path.join("/tmp/dev-browser-auto-connect-tests", "launched", "chrome-profile")}`,
+        "--remote-debugging-port=9333",
+        "--no-first-run",
+        "--no-default-browser-check",
+      ]),
+    });
+    const spawnedArgs = (spawnInstalled.mock.calls[0] as [{ args: string[] }])[0].args;
+    expect(spawnedArgs).not.toContain("--enable-automation");
+    expect(spawnedArgs).not.toContain("--disable-blink-features=AutomationControlled");
+    expect(connectOverCDP).toHaveBeenCalledWith("ws://127.0.0.1:9333/devtools/browser/isolated-chrome");
     expect(firstEntry.channel).toBe("chrome");
+    expect(firstEntry.type).toBe("launched");
     expect(reusedEntry).toBe(firstEntry);
+
+    const edgeContext = new MockContext();
+    const edgeBrowser = new MockBrowser([edgeContext]);
+    edgeContext.setBrowser(edgeBrowser);
+    connectOverCDP.mockImplementation(async () => edgeBrowser);
 
     const relaunchedEntry = await manager.ensureBrowser("launched", {
       channel: "msedge",
     });
 
-    expect(launchPersistentContext).toHaveBeenCalledTimes(2);
-    expect(launchPersistentContext).toHaveBeenNthCalledWith(
-      2,
-      path.join("/tmp/dev-browser-auto-connect-tests", "launched", "msedge-profile"),
-      expect.objectContaining({
-        channel: "msedge",
-        ignoreDefaultArgs: expect.arrayContaining(["--enable-automation", "--disable-sync"]),
-        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
-      })
-    );
+    expect(launchPersistentContext).not.toHaveBeenCalled();
+    expect(spawnInstalled).toHaveBeenCalledTimes(2);
     expect(relaunchedEntry).not.toBe(firstEntry);
     expect(relaunchedEntry.channel).toBe("msedge");
   });
 
-  it("does not strip automation switches when launching Playwright Chromium", async () => {
+  it("does not OS-spawn when launching Playwright Chromium", async () => {
     const launchPersistentContext = vi.fn(async () => {
       const context = new MockContext();
       const browser = new MockBrowser([context]);
       context.setBrowser(browser);
       return context;
     });
-    const { manager } = createManager({ launchPersistentContext });
+    const spawnInstalled = vi.fn();
+    const { manager } = createManager({ launchPersistentContext, spawnInstalled });
     await manager.ensureBrowser("bundled");
     const launched = launchPersistentContext.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(launched).toBeDefined();
@@ -343,6 +366,7 @@ describe("BrowserManager auto-connect", () => {
     expect(options.channel).toBeUndefined();
     expect(options.ignoreDefaultArgs).toBeUndefined();
     expect(options.args).toBeUndefined();
+    expect(spawnInstalled).not.toHaveBeenCalled();
   });
 
   it("closes a persistent context that returns after its request is aborted", async () => {

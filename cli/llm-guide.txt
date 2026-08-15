@@ -12,14 +12,16 @@ LLM USAGE GUIDE:
     "@ | dev-browser --browser my-login --channel chrome
 
   Launch installed Google Chrome (not Playwright Chromium) when a site rejects Chrome-for-Testing:
+    Sign into Google first on official chrome.exe with only --user-data-dir pointing at
+    ~/.dev-browser/browsers/<name>/chrome-profile/ (no debug flags). Then:
     dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'
     const page = await browser.getPage("main");
-    await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded" });
+    await page.goto("https://business.google.com/locations", { waitUntil: "domcontentloaded" });
     console.log(page.url());
     EOF
-    Profile: ~/.dev-browser/browsers/<name>/chrome-profile/. Cookies persist. This is not the user's daily Chrome.
+    --channel chrome OS-spawns official chrome.exe on that isolated profile and attaches over CDP.
+    Do not use that window for the Google password step. This is not the user's daily Chrome.
     --connect attaches to a Chrome the user already opened; named pages do not persist across --connect scripts.
-    Prefer --channel chrome for a durable isolated login. Use --connect only when that window is already up.
 
   Quick inspection:
     dev-browser --connect <<'EOF'

@@ -88,12 +88,14 @@ After installing, tell your agent to run `dev-browser --help` — the help outpu
 
 Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
 
-`--channel chrome` launches the installed Google Chrome with a dedicated profile under `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window. Playwright's `--enable-automation` / `--disable-sync` / `--disable-extensions` defaults are stripped so Google sign-in is not rejected as an automated browser. Bundled Chromium (`--browser` with no `--channel`) is unchanged.
+`--channel chrome` OS-spawns official `chrome.exe` with a dedicated profile under `~/.dev-browser/browsers/<name>/chrome-profile/`, then attaches over CDP. Playwright does not launch that binary. This is not the user's daily Chrome window.
+
+**Do not sign into Google in a `--channel chrome` window** (it starts with a debug port). Human signs in first on official `chrome.exe` with only `--user-data-dir` pointing at that same `chrome-profile`, plus `--no-first-run` and `--no-default-browser-check`. No debug flags. After sign-in, close that window (cookies stay) or enable `chrome://inspect/#remote-debugging`, then use `--channel chrome`. Bundled Chromium (`--browser` with no `--channel`) is unchanged.
 
 ```bash
 dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'
 const page = await browser.getPage("main");
-await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded" });
+await page.goto("https://business.google.com/locations", { waitUntil: "domcontentloaded" });
 console.log(page.url());
 EOF
 ```

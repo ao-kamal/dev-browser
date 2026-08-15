@@ -1,4 +1,7 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, mkdir, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
@@ -50,45 +53,83 @@ export function profileDirName(channel?: BrowserChannel): string {
   return "chromium-profile";
 }
 
-/**
- * Playwright's default Chromium switches that make installed Chrome/Edge
- * look automated. Google's "This browser or app may not be secure" check
- * is the one that actually bites `--channel chrome` (Playwright still
- * injects `--enable-automation` even when `channel` is the real binary).
- *
- * `--remote-debugging-pipe` stays: that is how Playwright talks to the
- * process. Do not add it here.
- */
-export const INSTALLED_CHANNEL_IGNORE_DEFAULT_ARGS = [
-  "--enable-automation",
-  "--disable-sync",
-  "--disable-extensions",
-  "--disable-component-extensions-with-background-pages",
-  "--disable-default-apps",
-  "--disable-client-side-phishing-detection",
-] as const;
-
-export const INSTALLED_CHANNEL_EXTRA_ARGS = [
-  "--disable-blink-features=AutomationControlled",
-] as const;
-
-export function installedChannelLaunchPatch(channel?: BrowserChannel): {
-  channel?: BrowserChannel;
-  ignoreDefaultArgs?: string[];
-  args?: string[];
-} {
-  if (!channel) {
-    return {};
-  }
-  return {
-    channel,
-    ignoreDefaultArgs: [...INSTALLED_CHANNEL_IGNORE_DEFAULT_ARGS],
-    args: [...INSTALLED_CHANNEL_EXTRA_ARGS],
-  };
+export interface SpawnInstalledBrowserOptions {
+  executablePath: string;
+  args: string[];
 }
 
-const HIDE_WEBDRIVER_INIT_SCRIPT =
-  'Object.defineProperty(Object.getPrototypeOf(navigator), "webdriver", { get: () => undefined, configurable: true });';
+export async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function allocateLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("Failed to allocate a loopback port"));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+export function spawnInstalledBrowser(options: SpawnInstalledBrowserOptions): { pid?: number } {
+  const child = spawn(options.executablePath, options.args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  });
+  child.unref();
+  return { pid: child.pid };
+}
+
+export function installedBrowserPathCandidates(
+  channel: BrowserChannel,
+  platform: NodeJS.Platform
+): string[] {
+  if (platform === "win32") {
+    const programFiles = process.env["ProgramFiles"] ?? "C:\\Program Files";
+    const programFilesX86 = process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
+    if (channel === "msedge") {
+      return [
+        path.join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
+        path.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
+      ];
+    }
+    return [
+      path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
+    ];
+  }
+
+  if (platform === "darwin") {
+    return channel === "msedge"
+      ? ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+      : ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
+  }
+
+  return channel === "msedge"
+    ? ["/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable"]
+    : ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"];
+}
 
 interface BrowserPageSummary {
   id: string;
@@ -98,13 +139,16 @@ interface BrowserPageSummary {
 }
 
 type BrowserManagerDependencies = {
+  allocatePort: () => Promise<number>;
   connectOverCDP: typeof chromium.connectOverCDP;
   fetch: typeof globalThis.fetch;
   homedir: () => string;
   launchPersistentContext: typeof chromium.launchPersistentContext;
   mkdir: typeof mkdir;
+  pathExists: (filePath: string) => Promise<boolean>;
   platform: NodeJS.Platform;
   readFile: typeof readFile;
+  spawnInstalled: (options: SpawnInstalledBrowserOptions) => { pid?: number };
 };
 
 interface BrowserOperationOptions {
@@ -149,7 +193,7 @@ function wrapChannelLaunchError(channel: BrowserChannel | undefined, error: unkn
   const product = channel === "msedge" ? "Microsoft Edge" : "Google Chrome";
   return new Error(
     `Could not launch installed ${product} (--channel ${channel}). ` +
-      `Install ${product} and retry. Playwright said: ${message}`
+      `Install ${product} and retry. ${message}`
   );
 }
 
@@ -164,6 +208,7 @@ export class BrowserManager {
   ) {
     this.baseDir = baseDir;
     this.dependencies = {
+      allocatePort: allocateLoopbackPort,
       connectOverCDP: chromium.connectOverCDP.bind(chromium) as typeof chromium.connectOverCDP,
       fetch: globalThis.fetch,
       homedir: os.homedir,
@@ -171,8 +216,10 @@ export class BrowserManager {
         chromium
       ) as typeof chromium.launchPersistentContext,
       mkdir,
+      pathExists,
       platform: process.platform,
       readFile,
+      spawnInstalled: spawnInstalledBrowser,
       ...dependencies,
     };
   }
@@ -492,6 +539,10 @@ export class BrowserManager {
     operation: BrowserOperationOptions = {}
   ): Promise<BrowserEntry> {
     assertSafeBrowserName(name);
+    if (channel) {
+      return this.launchInstalledChannel(name, channel, headless, ignoreHTTPSErrors, operation);
+    }
+
     const profileDir = path.join(this.baseDir, name, profileDirName(channel));
     await this.dependencies.mkdir(profileDir, { recursive: true });
 
@@ -505,14 +556,10 @@ export class BrowserManager {
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,
-        ...installedChannelLaunchPatch(channel),
         ...(timeout === undefined ? {} : { timeout }),
       });
     } catch (error) {
       throw wrapChannelLaunchError(channel, error);
-    }
-    if (channel) {
-      await context.addInitScript(HIDE_WEBDRIVER_INIT_SCRIPT);
     }
     const browser = context.browser();
 
@@ -546,6 +593,141 @@ export class BrowserManager {
     this.attachBrowserLifecycle(entry);
     this.browsers.set(name, entry);
     return entry;
+  }
+
+  private async launchInstalledChannel(
+    name: string,
+    channel: BrowserChannel,
+    headless: boolean,
+    ignoreHTTPSErrors: boolean,
+    operation: BrowserOperationOptions
+  ): Promise<BrowserEntry> {
+    const profileDir = path.join(this.baseDir, name, profileDirName(channel));
+    await this.dependencies.mkdir(profileDir, { recursive: true });
+
+    const existingEndpoint = await this.readProfileDevToolsEndpoint(profileDir);
+    if (existingEndpoint) {
+      return this.attachInstalledChannel(name, existingEndpoint, channel, profileDir, headless, ignoreHTTPSErrors, operation);
+    }
+
+    const executablePath = await this.resolveInstalledBrowserPath(channel);
+    const port = await this.dependencies.allocatePort();
+    if (port < 1) {
+      throw new Error(
+        "Refusing --remote-debugging-port=0. Chromium treats port 0 as automation."
+      );
+    }
+
+    const args = [
+      `--user-data-dir=${profileDir}`,
+      `--remote-debugging-port=${port}`,
+      "--remote-allow-origins=*",
+      "--no-first-run",
+      "--no-default-browser-check",
+    ];
+    if (headless) {
+      args.push("--headless=new");
+    }
+
+    try {
+      this.dependencies.spawnInstalled({ executablePath, args });
+    } catch (error) {
+      throw wrapChannelLaunchError(channel, error);
+    }
+
+    const httpEndpoint = `http://127.0.0.1:${port}`;
+    const product = channel === "msedge" ? "Microsoft Edge" : "Google Chrome";
+    let debuggerUrl: string;
+    try {
+      debuggerUrl = await this.waitForDebuggerEndpoint(httpEndpoint, operation);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Could not reach CDP on isolated ${product} (--channel ${channel}). ` +
+          `If a window is already using ${profileDir} without remote debugging, ` +
+          `close that window (cookies stay on disk) or enable chrome://inspect/#remote-debugging, then retry. ` +
+          detail
+      );
+    }
+
+    return this.attachInstalledChannel(
+      name,
+      debuggerUrl,
+      channel,
+      profileDir,
+      headless,
+      ignoreHTTPSErrors,
+      operation
+    );
+  }
+
+  private async attachInstalledChannel(
+    name: string,
+    endpoint: string,
+    channel: BrowserChannel,
+    profileDir: string,
+    headless: boolean,
+    ignoreHTTPSErrors: boolean,
+    operation: BrowserOperationOptions
+  ): Promise<BrowserEntry> {
+    const entry = await this.openConnectedBrowser(name, endpoint, operation);
+    entry.type = "launched";
+    entry.channel = channel;
+    entry.profileDir = profileDir;
+    entry.headless = headless;
+    entry.ignoreHTTPSErrors = ignoreHTTPSErrors;
+    return entry;
+  }
+
+  private async resolveInstalledBrowserPath(channel: BrowserChannel): Promise<string> {
+    const candidates = installedBrowserPathCandidates(channel, this.dependencies.platform);
+    for (const candidate of candidates) {
+      if (await this.dependencies.pathExists(candidate)) {
+        return candidate;
+      }
+    }
+    const product = channel === "msedge" ? "Microsoft Edge" : "Google Chrome";
+    throw new Error(
+      `Could not find installed ${product} (--channel ${channel}). Looked in: ${candidates.join(", ")}`
+    );
+  }
+
+  private async readProfileDevToolsEndpoint(profileDir: string): Promise<string | null> {
+    try {
+      const contents = await this.dependencies.readFile(
+        path.join(profileDir, "DevToolsActivePort"),
+        "utf8"
+      );
+      return this.parseDevToolsActivePort(contents);
+    } catch (error) {
+      if (isIgnorableFileError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async waitForDebuggerEndpoint(
+    httpEndpoint: string,
+    operation: BrowserOperationOptions
+  ): Promise<string> {
+    const deadline = operation.deadline ?? Date.now() + 15_000;
+    let lastError: unknown;
+
+    while (Date.now() < deadline) {
+      this.throwIfOperationAborted(operation);
+      const remaining = Math.max(1, Math.min(500, deadline - Date.now()));
+      const result = await this.fetchDebuggerWebSocketUrl(httpEndpoint, remaining);
+      if (result.status === "ok") {
+        return result.webSocketDebuggerUrl;
+      }
+      lastError = result.status;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    throw new Error(
+      `Timed out waiting for ${httpEndpoint}/json/version (${String(lastError ?? "unavailable")}).`
+    );
   }
 
   private async openConnectedBrowser(

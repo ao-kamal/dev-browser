@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- `--channel chrome` / `--channel msedge` now drop Playwright's automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`, and related) and disable Blink `AutomationControlled`, so Google sign-in is not rejected as "this browser or app may not be secure". Bundled Chromium launches are unchanged.
+- `--channel chrome` / `--channel msedge` now OS-spawn official `chrome.exe` / `msedge.exe` with the isolated `--user-data-dir` and attach over CDP. Playwright no longer launches those binaries. Google sign-in still happens first in a clean official window (no debug flags) on that same profile. The `09615f7` stealth switches (`ignoreDefaultArgs` / `AutomationControlled` / hide `webdriver`) are removed; they did not work. Bundled Chromium launches are unchanged.
 
 ## [0.2.9-ergo] - 2026-08-15
 

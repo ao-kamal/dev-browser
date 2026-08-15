@@ -162,7 +162,7 @@ struct Cli {
         value_name = "CHANNEL",
         value_parser = parse_channel,
         help = "Launch installed Chrome or Edge instead of Playwright Chromium",
-        long_help = "Launch the installed Google Chrome (`--channel chrome`) or Microsoft Edge (`--channel msedge`) instead of Playwright's bundled Chromium.\n\nUse this when a site (Google login, banks) rejects Chromium-for-Testing as \"this browser may not be secure\". The daemon still owns a dedicated profile under ~/.dev-browser/browsers/<name>/chrome-profile/ (or msedge-profile/). Cookies persist there. This does NOT attach to the user's daily Chrome window.\n\nInstalled-channel launches also drop Playwright's automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`) and disable Blink AutomationControlled, so Google sign-in is not rejected as an automated browser. Bundled Chromium is unchanged.\n\nOnly affects daemon-launched browsers. It has no effect with `--connect`. Omit --channel to keep Playwright Chromium."
+        long_help = "Launch the installed Google Chrome (`--channel chrome`) or Microsoft Edge (`--channel msedge`) instead of Playwright's bundled Chromium.\n\nOS-spawns official chrome.exe / msedge.exe with an isolated --user-data-dir under ~/.dev-browser/browsers/<name>/chrome-profile/ (or msedge-profile/), then attaches over CDP. Playwright does not launch those binaries. This is not the user's daily Chrome window.\n\nGoogle Account sign-in must happen first in a normal official Chrome window on that same user-data-dir, with no debug flags. After sign-in, --channel chrome can drive the cookies. If that isolated window is already open without remote debugging, close it (cookies stay) or enable chrome://inspect/#remote-debugging.\n\nOnly affects daemon-launched browsers. It has no effect with `--connect`. Omit --channel to keep Playwright Chromium."
     )]
     channel: Option<String>,
 
@@ -693,7 +693,7 @@ fn capabilities_document() -> Value {
         "flags": {
             "--json": "Available on `status`, `browsers`, and `capabilities` for machine-readable output.",
             "--connect": "Optional-value flag: bare `--connect` auto-discovers Chrome; `--connect <url>` or `--connect=<url>` attaches to a specific CDP endpoint. Use `--connect=auto` (with `=`) before a subcommand name to avoid the value swallowing it.",
-            "--channel": "Launch installed Google Chrome (`chrome`) or Microsoft Edge (`msedge`) instead of Playwright Chromium. Dedicated profile under ~/.dev-browser/browsers/<name>/. No effect with --connect.",
+            "--channel": "OS-spawn installed Google Chrome (`chrome`) or Microsoft Edge (`msedge`) with an isolated profile, then attach over CDP. Playwright does not launch those binaries. Sign into Google first on that same user-data-dir with no debug flags. No effect with --connect.",
             "--timeout": "Maximum script execution time in seconds (default 30).",
             "--version / -V": "Print the installed CLI version and exit."
         }
