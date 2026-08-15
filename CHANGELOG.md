@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `--channel chrome` / `--channel msedge` now drop Playwright's automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`, and related) and disable Blink `AutomationControlled`, so Google sign-in is not rejected as "this browser or app may not be secure". Bundled Chromium launches are unchanged.
+
 ## [0.2.9-ergo] - 2026-08-15
 
 - Added `--channel chrome` (and `msedge`) so daemon-launched browsers use the installed Google Chrome or Microsoft Edge instead of Playwright Chromium. Profiles live in `chrome-profile` / `msedge-profile` under the named browser dir so they do not mix with Chromium-for-Testing profiles.

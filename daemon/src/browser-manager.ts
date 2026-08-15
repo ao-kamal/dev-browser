@@ -50,6 +50,46 @@ export function profileDirName(channel?: BrowserChannel): string {
   return "chromium-profile";
 }
 
+/**
+ * Playwright's default Chromium switches that make installed Chrome/Edge
+ * look automated. Google's "This browser or app may not be secure" check
+ * is the one that actually bites `--channel chrome` (Playwright still
+ * injects `--enable-automation` even when `channel` is the real binary).
+ *
+ * `--remote-debugging-pipe` stays: that is how Playwright talks to the
+ * process. Do not add it here.
+ */
+export const INSTALLED_CHANNEL_IGNORE_DEFAULT_ARGS = [
+  "--enable-automation",
+  "--disable-sync",
+  "--disable-extensions",
+  "--disable-component-extensions-with-background-pages",
+  "--disable-default-apps",
+  "--disable-client-side-phishing-detection",
+] as const;
+
+export const INSTALLED_CHANNEL_EXTRA_ARGS = [
+  "--disable-blink-features=AutomationControlled",
+] as const;
+
+export function installedChannelLaunchPatch(channel?: BrowserChannel): {
+  channel?: BrowserChannel;
+  ignoreDefaultArgs?: string[];
+  args?: string[];
+} {
+  if (!channel) {
+    return {};
+  }
+  return {
+    channel,
+    ignoreDefaultArgs: [...INSTALLED_CHANNEL_IGNORE_DEFAULT_ARGS],
+    args: [...INSTALLED_CHANNEL_EXTRA_ARGS],
+  };
+}
+
+const HIDE_WEBDRIVER_INIT_SCRIPT =
+  'Object.defineProperty(Object.getPrototypeOf(navigator), "webdriver", { get: () => undefined, configurable: true });';
+
 interface BrowserPageSummary {
   id: string;
   url: string;
@@ -465,11 +505,14 @@ export class BrowserManager {
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,
-        ...(channel ? { channel } : {}),
+        ...installedChannelLaunchPatch(channel),
         ...(timeout === undefined ? {} : { timeout }),
       });
     } catch (error) {
       throw wrapChannelLaunchError(channel, error);
+    }
+    if (channel) {
+      await context.addInitScript(HIDE_WEBDRIVER_INIT_SCRIPT);
     }
     const browser = context.browser();
 

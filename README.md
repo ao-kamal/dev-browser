@@ -88,7 +88,7 @@ After installing, tell your agent to run `dev-browser --help` — the help outpu
 
 Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
 
-`--channel chrome` launches the installed Google Chrome with a dedicated profile under `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window.
+`--channel chrome` launches the installed Google Chrome with a dedicated profile under `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window. Playwright's `--enable-automation` / `--disable-sync` / `--disable-extensions` defaults are stripped so Google sign-in is not rejected as an automated browser. Bundled Chromium (`--browser` with no `--channel`) is unchanged.
 
 ```bash
 dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'

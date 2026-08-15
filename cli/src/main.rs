@@ -162,7 +162,7 @@ struct Cli {
         value_name = "CHANNEL",
         value_parser = parse_channel,
         help = "Launch installed Chrome or Edge instead of Playwright Chromium",
-        long_help = "Launch the installed Google Chrome (`--channel chrome`) or Microsoft Edge (`--channel msedge`) instead of Playwright's bundled Chromium.\n\nUse this when a site (Google login, banks) rejects Chromium-for-Testing as \"this browser may not be secure\". The daemon still owns a dedicated profile under ~/.dev-browser/browsers/<name>/chrome-profile/ (or msedge-profile/). Cookies persist there. This does NOT attach to the user's daily Chrome window.\n\nOnly affects daemon-launched browsers. It has no effect with `--connect`. Omit --channel to keep Playwright Chromium."
+        long_help = "Launch the installed Google Chrome (`--channel chrome`) or Microsoft Edge (`--channel msedge`) instead of Playwright's bundled Chromium.\n\nUse this when a site (Google login, banks) rejects Chromium-for-Testing as \"this browser may not be secure\". The daemon still owns a dedicated profile under ~/.dev-browser/browsers/<name>/chrome-profile/ (or msedge-profile/). Cookies persist there. This does NOT attach to the user's daily Chrome window.\n\nInstalled-channel launches also drop Playwright's automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`) and disable Blink AutomationControlled, so Google sign-in is not rejected as an automated browser. Bundled Chromium is unchanged.\n\nOnly affects daemon-launched browsers. It has no effect with `--connect`. Omit --channel to keep Playwright Chromium."
     )]
     channel: Option<String>,
 

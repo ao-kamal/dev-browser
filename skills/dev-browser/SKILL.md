@@ -20,7 +20,7 @@ Do not run `dev-browser install-skill`. That command is removed. It used to over
 
 Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
 
-`--channel chrome` launches the **installed** Google Chrome. The daemon still owns a dedicated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window.
+`--channel chrome` launches the **installed** Google Chrome. The daemon still owns a dedicated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window. Automation switches (`--enable-automation`, `--disable-sync`, `--disable-extensions`) are stripped so Google login works.
 
 ```bash
 dev-browser --browser my-login --channel chrome --idle-timeout 0 --timeout 60 <<'EOF'

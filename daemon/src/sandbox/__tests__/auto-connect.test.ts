@@ -95,6 +95,8 @@ class MockContext {
   async close(): Promise<void> {
     this.closeCalls += 1;
   }
+
+  async addInitScript(): Promise<void> {}
 }
 
 class MockBrowser extends EventEmitter {
@@ -301,6 +303,8 @@ describe("BrowserManager auto-connect", () => {
       expect.objectContaining({
         channel: "chrome",
         headless: false,
+        ignoreDefaultArgs: expect.arrayContaining(["--enable-automation", "--disable-sync"]),
+        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
       })
     );
     expect(firstEntry.channel).toBe("chrome");
@@ -316,10 +320,29 @@ describe("BrowserManager auto-connect", () => {
       path.join("/tmp/dev-browser-auto-connect-tests", "launched", "msedge-profile"),
       expect.objectContaining({
         channel: "msedge",
+        ignoreDefaultArgs: expect.arrayContaining(["--enable-automation", "--disable-sync"]),
+        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
       })
     );
     expect(relaunchedEntry).not.toBe(firstEntry);
     expect(relaunchedEntry.channel).toBe("msedge");
+  });
+
+  it("does not strip automation switches when launching Playwright Chromium", async () => {
+    const launchPersistentContext = vi.fn(async () => {
+      const context = new MockContext();
+      const browser = new MockBrowser([context]);
+      context.setBrowser(browser);
+      return context;
+    });
+    const { manager } = createManager({ launchPersistentContext });
+    await manager.ensureBrowser("bundled");
+    const launched = launchPersistentContext.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(launched).toBeDefined();
+    const options = launched[1];
+    expect(options.channel).toBeUndefined();
+    expect(options.ignoreDefaultArgs).toBeUndefined();
+    expect(options.args).toBeUndefined();
   });
 
   it("closes a persistent context that returns after its request is aborted", async () => {
