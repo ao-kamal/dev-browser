@@ -1,11 +1,21 @@
 ---
 name: dev-browser
-description: Browser automation with persistent page state. Use when users ask to navigate websites, fill forms, take screenshots, extract web data, test web apps, or automate browser workflows. Trigger phrases include "go to [url]", "click on", "fill out the form", "take a screenshot", "scrape", "automate", "test the website", "log into", or any browser interaction request.
+description: >-
+  Drives official Chrome or Playwright Chromium from sandboxed scripts with
+  persistent pages. Use when navigating sites, filling forms, taking
+  screenshots, scraping JS pages, working in a logged-in session, or Google
+  shows "this browser or app may not be secure". Human types the Google
+  password in official chrome.exe on an isolated profile with no debug flags;
+  then --channel chrome. Trigger phrases: "go to [url]", "click", "screenshot",
+  "scrape", "log into", "browser may not be secure", "official Chrome".
+  Not for writing Playwright test files or raw HTTP status checks.
 ---
 
 # Dev Browser
 
-A CLI for controlling browsers with sandboxed JavaScript scripts. Pages behave like Playwright Page objects, driven from a background daemon — see Sandbox limits below for the differences.
+> **Core Insight:** Official Chrome plus an isolated profile is the Google login path. Playwright launch is not. The CLI is a heredoc against a daemon, not a test file you commit.
+
+A CLI for controlling browsers with sandboxed JavaScript scripts. Pages behave like Playwright Page objects, driven from a background daemon.
 
 ## Installation
 
@@ -14,18 +24,36 @@ npm install -g dev-browser
 dev-browser install
 ```
 
-Do not run `dev-browser install-skill`. That command is removed. It used to overwrite a local mined skill with this stub.
+Do not run `dev-browser install-skill`. Removed. It overwrote local mined skill copies.
 
-## Real Chrome vs Playwright Chromium
+## Official Chrome vs Playwright Chromium
 
-Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
+Terms: **official Chrome** = Program Files `chrome.exe`. **isolated profile** = `~/.dev-browser/browsers/<name>/chrome-profile`. Not daily **Profile 1**. Avoid "real Chrome" / "my Chrome".
 
-`--channel chrome` OS-spawns official `chrome.exe` with an isolated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`, then attaches over CDP. Playwright does not launch that binary. This is not the user's daily Chrome window.
+Default `--browser` launches Playwright Chromium (Chrome for Testing). Google blocks that.
 
-Do not sign into Google inside a `--channel chrome` window (it starts with a debug port). Sign in first on official `chrome.exe` with only `--user-data-dir` pointing at that same `chrome-profile`, plus `--no-first-run` and `--no-default-browser-check`. After sign-in, close that window (cookies stay) or enable `chrome://inspect/#remote-debugging`, then use `--channel chrome`.
+`--channel chrome` OS-spawns official Chrome on the isolated profile and attaches over CDP (debug port on). Playwright does not launch that binary. `--channel msedge` is the Edge sibling.
+
+**Google password step — Phase 1.** Human types it. Agent does not. Detached official Chrome, no debug flags, no Playwright, no `--channel chrome`.
+
+```powershell
+$profile = Join-Path $env:USERPROFILE ".dev-browser/browsers/<name>/chrome-profile"
+Start-Process "C:/Program Files/Google/Chrome/Application/chrome.exe" -ArgumentList @(
+  "--user-data-dir=$profile",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "https://accounts.google.com/"
+)
+```
+
+If the window dies with the agent Job Object, spawn the same command line via WMI `Win32_Process.Create`.
+
+**Done when:** the isolated window shows the Google account and does not show "This browser or app may not be secure". Then close that window (cookies stay) or enable `chrome://inspect/#remote-debugging`.
+
+**Phase 2.** Only then:
 
 ```bash
-dev-browser --browser my-login --channel chrome --idle-timeout 0 --timeout 60 <<'EOF'
+dev-browser --browser <name> --channel chrome --idle-timeout 0 --timeout 60 <<'EOF'
 const page = await browser.getPage("main");
 await page.setViewportSize({ width: 1280, height: 660 });
 await page.goto("https://business.google.com/locations", { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -33,13 +61,11 @@ console.log(JSON.stringify({ url: page.url(), title: await page.title() }));
 EOF
 ```
 
-`--channel msedge` is the same path for Microsoft Edge.
+Do not start a second `chrome.exe` with `--remote-debugging-port`. `--channel chrome` already does that. If CDP fails, the Phase 1 window is still holding the profile; close it and retry Phase 2.
 
-`--connect` attaches to a Chrome the user already opened. Named pages do **not** persist across `--connect` scripts. Use `--connect` only when that window is already up with remote debugging.
+`--connect` attaches to a Chrome already running with remote debugging. Named pages do **not** persist across `--connect` scripts.
 
 ## The canonical script
-
-Keep every script small, focused, one job — end it with a `console.log` of the state you need for the next decision.
 
 ```bash
 dev-browser --timeout 60 <<'EOF'
@@ -49,46 +75,47 @@ console.log(JSON.stringify({ url: page.url(), title: await page.title() }));
 EOF
 ```
 
-## Method ladder — try the direct verb first
+## Method ladder
 
-Work down this list only as each rung fails. The common mistake is skipping straight to `page.evaluate()` to find-and-click something a locator would hit directly — it bypasses Playwright's actionability waits and silently clicks the wrong node.
+Work down this list only as each rung fails.
 
-1. **Known selector → a Playwright locator.** `getByRole`, `getByText`, `getByLabel`, `locator()`. Default for almost everything.
-2. **Unknown page → `page.snapshotForAI()` once** to discover elements, then act on locators from what it returns.
-3. **After ~2 failed locator attempts on the same target → `page.domCua`** (act by node id from `getVisibleDom()`).
-4. **Visual-only structure, no stable DOM (e.g. canvas) → `page.cua`** (act by coordinates read off a screenshot).
-5. **`page.evaluate()` → read-only introspection, last resort.** Compute a value or check state — never to click, scroll, or find.
+1. **Known selector → a Playwright locator.** `getByRole`, `getByText`, `getByLabel`, `locator()`.
+2. **Unknown page → `page.snapshotForAI()` once**, then locators.
+3. **After 2 failed locator attempts → `page.domCua`**.
+4. **Canvas / no DOM → `page.cua`**.
+5. **`page.evaluate()` → read-only.** Never to click, scroll, or find.
 
-## Timeouts — three separate clocks
+## Timeouts
 
-- **`--timeout N`** sets the whole script's budget. It does **not** raise Playwright's per-action timeout.
-- **Each action** (`goto`, `click`, `screenshot`, `snapshotForAI`) has its own ~30s default, independent of `--timeout`. Raise it explicitly on the call: `page.goto(url, { timeout: 45000, waitUntil: "domcontentloaded" })`.
-- **The outer shell/tool** running dev-browser has its own separate kill clock (e.g. a Bash tool's ~2min limit) — not fixable by any dev-browser flag. If that's what's killing the run, shorten the script; don't raise `--timeout`.
+- `--timeout N` is the whole script. It does not raise Playwright's per-action timeout.
+- Each `goto` / `click` / `screenshot` has its own ~30s default. Raise it on the call: `page.goto(url, { timeout: 45000, waitUntil: "domcontentloaded" })`.
+- The outer shell has a separate kill clock. Shorten the script; do not only raise `--timeout`.
+- Use `waitUntil: "domcontentloaded"`, not `"networkidle"`.
 
-If a `goto`/`click` keeps failing at "30000ms exceeded" even after raising `--timeout`, you're chasing the wrong clock — pass `{ timeout }` on that specific call instead.
+## Named pages and one daemon
 
-Use `waitUntil: "domcontentloaded"`, not `"networkidle"` — `networkidle` hangs indefinitely on any site with analytics, trackers, or SPA polling.
+- `getPage("checkout")` is the same tab next script. Reuse it.
+- `getPage("typo")` silently creates a blank page. Treat `about:blank` as a wrong name.
+- Never fire two dev-browser calls at once. Per-agent `--browser <name>`. Never global `dev-browser stop`.
 
-## Named pages persist — and typos make blank ones
+## Sandbox
 
-- `browser.getPage("checkout")` returns the **same tab** across separate script invocations. Reuse it — don't re-navigate or re-log-in.
-- **`getPage("typo")` silently creates a new blank page** instead of erroring. A blank/`about:blank` result usually means a misspelled name, not a broken page — check spelling before assuming something failed.
-- Use a fresh/random page name to simulate a first-time visitor (no cookies, first-load popups).
+- No `require` / `import` / `process` / `fs` / `fetch` at the top level.
+- `document` / `window` only inside `page.evaluate(() => ...)`.
+- `setInputFiles(path)` fails. Generate the file in-page (canvas → `File` → `DataTransfer`).
+- `readFile()` is UTF-8. Use `readFile(name, "base64")` for binary.
 
-## One daemon — never run calls in parallel
+## Anti-patterns
 
-- All dev-browser calls share **one background daemon**. Never fire two dev-browser calls at once — they serialize on the daemon and can wedge Chromium under load. Loop *inside* one script instead.
-- Running multiple agents concurrently: give each its own **`--browser <name>`**. **Never run global `dev-browser stop`** — it kills every agent's browser, not just yours.
-
-## Sandbox limits — this is QuickJS, not Node
-
-- No `require`/`import`/`process`/`fs`/`fetch` at the script's top level.
-- **`document`/`window`/DOM globals only exist inside `page.evaluate(() => ...)`** — never at the top level. `document is not defined` means you're outside `evaluate()`.
-- **`setInputFiles` with a host file path fails** — there's no filesystem in the sandbox. For uploads, generate the file in-page (canvas → `Blob`/`File` → `DataTransfer`) and inject it.
-- **`readFile()` defaults to UTF-8** and will corrupt a screenshot or other binary file — pass `readFile(name, "base64")` to round-trip binary losslessly.
+| Don't | Do |
+|---|---|
+| Type the Google password in `--channel chrome` | Phase 1 detached official Chrome; human types it |
+| `Start-Process` a second Chrome with a debug port after sign-in | Close the sign-in window or enable inspect, then `--channel chrome` |
+| `page.evaluate()` to find/click/scroll | Locator first |
+| Escalate `--timeout` for a 30000ms `goto` | `{ timeout }` on that call |
+| `waitUntil: "networkidle"` | `"domcontentloaded"` |
+| Parallel calls or global `stop` | One script; per-agent `--browser` |
 
 ## Usage
 
-Run `dev-browser --help` for the complete, authoritative API — method reference, `cua`/`domCua` details, `--connect` mode, and the full option list.
-
-Named daemon-launched browsers persist by default. For unattended work, `--idle-timeout 5m` closes each launched browser after inactivity while preserving its profile and login state. The setting never closes Chrome attached with `--connect`; use `--idle-timeout 0` to disable configured cleanup.
+`dev-browser --help` is the API. `--idle-timeout 5m` closes idle daemon-launched browsers and keeps the profile. It never closes `--connect` Chrome. `--idle-timeout 0` disables cleanup.
