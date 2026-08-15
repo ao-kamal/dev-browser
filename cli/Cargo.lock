@@ -130,10 +130,9 @@ dependencies = [
 
 [[package]]
 name = "dev-browser"
-version = "0.2.8-ergo"
+version = "0.2.9-ergo"
 dependencies = [
  "clap",
- "dialoguer",
  "dirs",
  "interprocess",
  "libc",

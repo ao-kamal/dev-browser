@@ -168,6 +168,7 @@ async function handleExecute(socket: net.Socket, request: ExecuteRequest): Promi
             await manager.ensureBrowser(currentRequest.browser, {
               headless: currentRequest.headless,
               ignoreHTTPSErrors: currentRequest.ignoreHTTPSErrors,
+              channel: currentRequest.channel,
               ...operation,
             });
           }

@@ -44,3 +44,35 @@ describe("idle timeout protocol configuration", () => {
     ).toBe(false);
   });
 });
+
+describe("execute request channel", () => {
+  it("accepts chrome and msedge", () => {
+    for (const channel of ["chrome", "msedge"] as const) {
+      const parsed = parseRequest(
+        JSON.stringify({
+          id: `exec-${channel}`,
+          type: "execute",
+          script: "console.log(1)",
+          channel,
+        })
+      );
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.request).toMatchObject({ channel });
+      }
+    }
+  });
+
+  it("rejects an unknown channel", () => {
+    expect(
+      parseRequest(
+        JSON.stringify({
+          id: "exec-bad",
+          type: "execute",
+          script: "console.log(1)",
+          channel: "firefox",
+        })
+      ).success
+    ).toBe(false);
+  });
+});

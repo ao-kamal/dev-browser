@@ -1,7 +1,7 @@
 # Free Windows build of dev-browser (agent-ergonomics fork) via AppVeyor.
 # Builds on AppVeyor's servers — no local download, no GitHub Actions billing.
 # Produces dev-browser-windows-x64.exe as a downloadable artifact.
-version: 0.2.8-ergo.{build}
+version: 0.2.9-ergo.{build}
 image: Visual Studio 2022
 clone_depth: 1
 

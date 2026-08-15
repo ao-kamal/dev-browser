@@ -14,6 +14,27 @@ npm install -g dev-browser
 dev-browser install
 ```
 
+Do not run `dev-browser install-skill`. That command is removed. It used to overwrite a local mined skill with this stub.
+
+## Real Chrome vs Playwright Chromium
+
+Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
+
+`--channel chrome` launches the **installed** Google Chrome. The daemon still owns a dedicated profile at `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window.
+
+```bash
+dev-browser --browser my-login --channel chrome --idle-timeout 0 --timeout 60 <<'EOF'
+const page = await browser.getPage("main");
+await page.setViewportSize({ width: 1280, height: 660 });
+await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded", timeout: 45000 });
+console.log(JSON.stringify({ url: page.url(), title: await page.title() }));
+EOF
+```
+
+`--channel msedge` is the same path for Microsoft Edge.
+
+`--connect` attaches to a Chrome the user already opened. Named pages do **not** persist across `--connect` scripts. Prefer `--channel chrome` when you need a durable isolated login. Use `--connect` only when that window is already up with remote debugging.
+
 ## The canonical script
 
 Keep every script small, focused, one job — end it with a `console.log` of the state you need for the next decision.

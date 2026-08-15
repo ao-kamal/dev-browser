@@ -9,7 +9,17 @@ LLM USAGE GUIDE:
     @"
     const page = await browser.getPage("main");
     console.log(await page.title());
-    "@ | dev-browser --connect
+    "@ | dev-browser --browser my-login --channel chrome
+
+  Launch installed Google Chrome (not Playwright Chromium) when a site rejects Chrome-for-Testing:
+    dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'
+    const page = await browser.getPage("main");
+    await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded" });
+    console.log(page.url());
+    EOF
+    Profile: ~/.dev-browser/browsers/<name>/chrome-profile/. Cookies persist. This is not the user's daily Chrome.
+    --connect attaches to a Chrome the user already opened; named pages do not persist across --connect scripts.
+    Prefer --channel chrome for a durable isolated login. Use --connect only when that window is already up.
 
   Quick inspection:
     dev-browser --connect <<'EOF'

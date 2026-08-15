@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9-ergo] - 2026-08-15
+
+- Added `--channel chrome` (and `msedge`) so daemon-launched browsers use the installed Google Chrome or Microsoft Edge instead of Playwright Chromium. Profiles live in `chrome-profile` / `msedge-profile` under the named browser dir so they do not mix with Chromium-for-Testing profiles.
+- Removed the `install-skill` command. It overwrote local mined skill copies with the stub shipped in the binary.
 - Added configurable per-browser idle cleanup with `--idle-timeout`, `DEV_BROWSER_IDLE_TIMEOUT_MS`, and `~/.dev-browser/config.json` support. Idle cleanup preserves persistent profiles, excludes externally connected Chrome, and safely rechecks activity under the per-browser lock before closing.
 - On Windows, daemon spawn now breaks out of the parent Job Object (`CREATE_BREAKAWAY_FROM_JOB`, with a WMI `Win32_Process.Create` fallback when breakaway is denied) so the daemon survives agent-harness command teardown.
 

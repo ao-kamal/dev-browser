@@ -2,7 +2,6 @@ mod config;
 mod connection;
 mod daemon;
 mod doctor;
-mod skill;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use config::{effective_idle_timeout_ms, parse_idle_timeout};
@@ -14,7 +13,6 @@ use daemon::{
 use doctor::{run_doctor, DoctorOptions, DEFAULT_MIN_AGE_DAYS, DEFAULT_STALE_DAYS};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use skill::install_skill;
 use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
@@ -74,6 +72,11 @@ Primary invocation styles:
   EOF
   dev-browser --connect <<'EOF'
     const page = await browser.getPage("main");
+    console.log(await page.title());
+  EOF
+  dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'
+    const page = await browser.getPage("main");
+    await page.goto("https://accounts.google.com");
     console.log(await page.title());
   EOF
 
@@ -156,6 +159,15 @@ struct Cli {
 
     #[arg(
         long,
+        value_name = "CHANNEL",
+        value_parser = parse_channel,
+        help = "Launch installed Chrome or Edge instead of Playwright Chromium",
+        long_help = "Launch the installed Google Chrome (`--channel chrome`) or Microsoft Edge (`--channel msedge`) instead of Playwright's bundled Chromium.\n\nUse this when a site (Google login, banks) rejects Chromium-for-Testing as \"this browser may not be secure\". The daemon still owns a dedicated profile under ~/.dev-browser/browsers/<name>/chrome-profile/ (or msedge-profile/). Cookies persist there. This does NOT attach to the user's daily Chrome window.\n\nOnly affects daemon-launched browsers. It has no effect with `--connect`. Omit --channel to keep Playwright Chromium."
+    )]
+    channel: Option<String>,
+
+    #[arg(
+        long,
         default_value_t = DEFAULT_SCRIPT_TIMEOUT_SECS,
         value_name = "SECONDS",
         value_parser = clap::value_parser!(u32).range(1..),
@@ -197,27 +209,6 @@ enum Command {
         long_about = "Install Playwright browsers (Chromium).\n\nDownloads the Chromium build used for daemon-managed browser instances."
     )]
     Install,
-    #[command(
-        about = "Install the dev-browser skill into agent skill directories",
-        long_about = "Install the embedded dev-browser skill into agent skill directories.\n\nBy default, launches an interactive multi-select prompt for the supported install targets when a TTY is available.\n\nIn non-interactive environments, installs to all supported skill directories, including Codex, so upgrades replace stale skill copies.\n\nUse `--claude`, `--agents`, and/or `--codex` to skip prompting and install to specific targets."
-    )]
-    InstallSkill {
-        #[arg(
-            long,
-            help = "Install the skill into ~/.claude/skills without prompting"
-        )]
-        claude: bool,
-        #[arg(
-            long,
-            help = "Install the skill into ~/.agents/skills without prompting"
-        )]
-        agents: bool,
-        #[arg(
-            long,
-            help = "Install the skill into ~/.codex/skills without prompting"
-        )]
-        codex: bool,
-    },
     #[command(
         about = "List all managed browser instances",
         long_about = "List all managed browser instances.\n\nShows the browser name, whether it is daemon-launched or externally connected, its status, and any named pages currently registered."
@@ -481,14 +472,6 @@ fn run() -> Result<i32, Box<dyn Error>> {
             install_daemon_runtime()?;
             Ok(0)
         }
-        Some(Command::InstallSkill {
-            claude,
-            agents,
-            codex,
-        }) => {
-            install_skill(*claude, *agents, *codex)?;
-            Ok(0)
-        }
         Some(Command::Status { json }) => {
             let idle_timeout_ms = effective_idle_timeout_ms(cli.idle_timeout)?;
             ensure_daemon()?;
@@ -588,7 +571,6 @@ fn known_subcommand_names() -> &'static [&'static str] {
     &[
         "run",
         "install",
-        "install-skill",
         "browsers",
         "status",
         "stop",
@@ -660,6 +642,18 @@ fn parse_connect_value(raw: &str) -> Result<String, String> {
     Ok(raw.to_string())
 }
 
+const SUPPORTED_CHANNELS: &[&str] = &["chrome", "msedge"];
+
+fn parse_channel(raw: &str) -> Result<String, String> {
+    if SUPPORTED_CHANNELS.contains(&raw) {
+        return Ok(raw.to_string());
+    }
+
+    Err(format!(
+        "Unknown channel '{raw}'. Supported: chrome, msedge. Omit --channel to use Playwright Chromium."
+    ))
+}
+
 fn capabilities_document() -> Value {
     let exit_codes: Vec<Value> = ExitCode::dictionary()
         .into_iter()
@@ -674,7 +668,6 @@ fn capabilities_document() -> Value {
         "commands": [
             { "name": "run", "about": "Run a script file against the browser" },
             { "name": "install", "about": "Install Playwright browsers (Chromium) and verify Chromium actually launches" },
-            { "name": "install-skill", "about": "Install the dev-browser skill into agent skill directories" },
             { "name": "browsers", "about": "List all managed browser instances", "json_flag": true },
             { "name": "status", "about": "Show daemon status", "json_flag": true },
             { "name": "stop", "about": "Stop the daemon and all browsers, or one named browser with --browser <NAME>" },
@@ -700,6 +693,7 @@ fn capabilities_document() -> Value {
         "flags": {
             "--json": "Available on `status`, `browsers`, and `capabilities` for machine-readable output.",
             "--connect": "Optional-value flag: bare `--connect` auto-discovers Chrome; `--connect <url>` or `--connect=<url>` attaches to a specific CDP endpoint. Use `--connect=auto` (with `=`) before a subcommand name to avoid the value swallowing it.",
+            "--channel": "Launch installed Google Chrome (`chrome`) or Microsoft Edge (`msedge`) instead of Playwright Chromium. Dedicated profile under ~/.dev-browser/browsers/<name>/. No effect with --connect.",
             "--timeout": "Maximum script execution time in seconds (default 30).",
             "--version / -V": "Print the installed CLI version and exit."
         }
@@ -765,6 +759,16 @@ fn run_script(cli: &Cli, script: String) -> Result<i32, Box<dyn Error>> {
 
     if cli.ignore_https_errors {
         request["ignoreHTTPSErrors"] = Value::Bool(true);
+    }
+
+    if let Some(channel) = &cli.channel {
+        if cli.connect.is_some() {
+            eprintln!(
+                "Warning: --channel {channel} has no effect with --connect. --connect attaches to an already-running browser."
+            );
+        } else {
+            request["channel"] = Value::String(channel.clone());
+        }
     }
 
     if let Some(endpoint) = &cli.connect {
@@ -1358,5 +1362,29 @@ mod tests {
     fn idle_timeout_zero_is_accepted() {
         let cli = Cli::try_parse_from(["dev-browser", "--idle-timeout", "0", "status"]).unwrap();
         assert_eq!(cli.idle_timeout, Some(0));
+    }
+
+    #[test]
+    fn channel_flag_accepts_chrome_and_msedge() {
+        let chrome =
+            Cli::try_parse_from(["dev-browser", "--channel", "chrome", "status"]).unwrap();
+        assert_eq!(chrome.channel.as_deref(), Some("chrome"));
+
+        let edge = Cli::try_parse_from(["dev-browser", "--channel", "msedge", "status"]).unwrap();
+        assert_eq!(edge.channel.as_deref(), Some("msedge"));
+    }
+
+    #[test]
+    fn channel_flag_rejects_unknown_values() {
+        let result = Cli::try_parse_from(["dev-browser", "--channel", "firefox", "status"]);
+        let err = result.err().expect("--channel firefox should be rejected");
+        assert!(err.to_string().contains("Unknown channel"));
+    }
+
+    #[test]
+    fn install_skill_is_not_a_command() {
+        assert!(!known_subcommand_names().contains(&"install-skill"));
+        let result = Cli::try_parse_from(["dev-browser", "install-skill"]);
+        assert!(result.is_err());
     }
 }

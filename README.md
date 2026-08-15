@@ -82,17 +82,23 @@ The background daemon is started so it outlives the CLI process. On Windows that
 
 ### Using with AI agents
 
-After installing, tell your agent to run `dev-browser --help` — the help output includes the current LLM usage guide and API reference.
+After installing, tell your agent to run `dev-browser --help` — the help output includes the current LLM usage guide and API reference. The skill ships in `skills/dev-browser/`; do not run `install-skill` (that command is gone — it overwrote local skill copies).
 
-For agents that discover local skills, install or refresh the embedded skill explicitly:
+### Installed Chrome instead of Playwright Chromium
+
+Default `--browser` launches Playwright's bundled Chromium ("Chrome for Testing"). Google login and some banks reject that as an insecure browser.
+
+`--channel chrome` launches the installed Google Chrome with a dedicated profile under `~/.dev-browser/browsers/<name>/chrome-profile/`. Cookies persist. This is not the user's daily Chrome window.
 
 ```bash
-dev-browser install-skill --codex   # ~/.codex/skills/dev-browser/SKILL.md
-dev-browser install-skill --claude  # ~/.claude/skills/dev-browser/SKILL.md
-dev-browser install-skill --agents  # ~/.agents/skills/dev-browser/SKILL.md
+dev-browser --browser my-login --channel chrome --idle-timeout 0 <<'EOF'
+const page = await browser.getPage("main");
+await page.goto("https://accounts.google.com", { waitUntil: "domcontentloaded" });
+console.log(page.url());
+EOF
 ```
 
-Flags may be combined. With an interactive terminal, `dev-browser install-skill` prompts for targets. In non-interactive environments it updates all three locations, including Codex, so an older copied skill does not survive a CLI upgrade.
+`--channel msedge` is the same path for Microsoft Edge. `--connect` still attaches to a Chrome the user already opened; named pages do not persist across `--connect` scripts.
 
 ### Idle browser cleanup
 

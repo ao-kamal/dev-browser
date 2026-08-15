@@ -1,6 +1,6 @@
 [package]
 name = "dev-browser"
-version = "0.2.8-ergo"
+version = "0.2.9-ergo"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
 libc = "0.2"
-dialoguer = "0.12"
 interprocess = "2.2.3"
 
 [profile.release]

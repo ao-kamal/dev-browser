@@ -5,12 +5,17 @@ const RequestBaseSchema = z.object({
   idleTimeoutMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 
+export const BROWSER_CHANNELS = ["chrome", "msedge"] as const;
+export const BrowserChannelSchema = z.enum(BROWSER_CHANNELS);
+export type BrowserChannel = z.infer<typeof BrowserChannelSchema>;
+
 const ExecuteRequestSchema = RequestBaseSchema.extend({
   type: z.literal("execute"),
   browser: z.string().min(1).default("default"),
   script: z.string(),
   headless: z.boolean().optional(),
   ignoreHTTPSErrors: z.boolean().optional(),
+  channel: BrowserChannelSchema.optional(),
   connect: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive().optional(),
 });

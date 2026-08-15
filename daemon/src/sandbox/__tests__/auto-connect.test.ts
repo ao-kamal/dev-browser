@@ -278,6 +278,50 @@ describe("BrowserManager auto-connect", () => {
     expect(relaunchedEntry.ignoreHTTPSErrors).toBe(true);
   });
 
+  it("passes channel chrome to launch and uses a chrome-profile directory", async () => {
+    const launchPersistentContext = vi.fn(async () => {
+      const context = new MockContext();
+      const browser = new MockBrowser([context]);
+      context.setBrowser(browser);
+      return context;
+    });
+    const { manager } = createManager({
+      launchPersistentContext,
+    });
+
+    const firstEntry = await manager.ensureBrowser("launched", {
+      channel: "chrome",
+    });
+    const reusedEntry = await manager.ensureBrowser("launched");
+
+    expect(launchPersistentContext).toHaveBeenCalledTimes(1);
+    expect(launchPersistentContext).toHaveBeenNthCalledWith(
+      1,
+      path.join("/tmp/dev-browser-auto-connect-tests", "launched", "chrome-profile"),
+      expect.objectContaining({
+        channel: "chrome",
+        headless: false,
+      })
+    );
+    expect(firstEntry.channel).toBe("chrome");
+    expect(reusedEntry).toBe(firstEntry);
+
+    const relaunchedEntry = await manager.ensureBrowser("launched", {
+      channel: "msedge",
+    });
+
+    expect(launchPersistentContext).toHaveBeenCalledTimes(2);
+    expect(launchPersistentContext).toHaveBeenNthCalledWith(
+      2,
+      path.join("/tmp/dev-browser-auto-connect-tests", "launched", "msedge-profile"),
+      expect.objectContaining({
+        channel: "msedge",
+      })
+    );
+    expect(relaunchedEntry).not.toBe(firstEntry);
+    expect(relaunchedEntry.channel).toBe("msedge");
+  });
+
   it("closes a persistent context that returns after its request is aborted", async () => {
     const controller = new AbortController();
     const context = new MockContext();

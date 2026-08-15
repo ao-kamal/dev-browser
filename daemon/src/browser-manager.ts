@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 
+import type { BrowserChannel } from "./protocol.js";
+
 // A --browser name becomes a directory segment in the on-disk profile path
 // (`<baseDir>/<name>/chromium-profile`). Reject anything that could escape that
 // directory before it ever reaches path.join — mirrors the containment guard in
@@ -27,6 +29,7 @@ export interface BrowserEntry {
   endpoint?: string;
   headless: boolean;
   ignoreHTTPSErrors: boolean;
+  channel?: BrowserChannel;
 }
 
 interface BrowserSummary {
@@ -34,6 +37,17 @@ interface BrowserSummary {
   type: BrowserEntry["type"];
   status: "running" | "connected" | "disconnected";
   pages: string[];
+  channel?: BrowserChannel;
+}
+
+export function profileDirName(channel?: BrowserChannel): string {
+  if (channel === "chrome") {
+    return "chrome-profile";
+  }
+  if (channel === "msedge") {
+    return "msedge-profile";
+  }
+  return "chromium-profile";
 }
 
 interface BrowserPageSummary {
@@ -82,6 +96,23 @@ function isHttpEndpoint(endpoint: string): boolean {
   return endpoint.startsWith("http://") || endpoint.startsWith("https://");
 }
 
+function wrapChannelLaunchError(channel: BrowserChannel | undefined, error: unknown): Error {
+  if (!channel) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/not found|Executable doesn't exist/i.test(message)) {
+    return error instanceof Error ? error : new Error(message);
+  }
+
+  const product = channel === "msedge" ? "Microsoft Edge" : "Google Chrome";
+  return new Error(
+    `Could not launch installed ${product} (--channel ${channel}). ` +
+      `Install ${product} and retry. Playwright said: ${message}`
+  );
+}
+
 export class BrowserManager {
   private readonly browsers = new Map<string, BrowserEntry>();
   private readonly baseDir: string;
@@ -111,6 +142,7 @@ export class BrowserManager {
     options: {
       headless?: boolean;
       ignoreHTTPSErrors?: boolean;
+      channel?: BrowserChannel;
       deadline?: number;
       signal?: AbortSignal;
     } = {}
@@ -123,6 +155,7 @@ export class BrowserManager {
     const requestedHeadless = options.headless ?? existing?.headless ?? false;
     const requestedIgnoreHTTPSErrors =
       options.ignoreHTTPSErrors ?? existing?.ignoreHTTPSErrors ?? false;
+    const requestedChannel = options.channel ?? existing?.channel;
 
     if (existing) {
       const needsRelaunch =
@@ -130,7 +163,8 @@ export class BrowserManager {
         !existing.browser.isConnected() ||
         (options.headless !== undefined && existing.headless !== requestedHeadless) ||
         (options.ignoreHTTPSErrors !== undefined &&
-          existing.ignoreHTTPSErrors !== requestedIgnoreHTTPSErrors);
+          existing.ignoreHTTPSErrors !== requestedIgnoreHTTPSErrors) ||
+        (options.channel !== undefined && existing.channel !== requestedChannel);
 
       if (!needsRelaunch) {
         return existing;
@@ -139,7 +173,13 @@ export class BrowserManager {
       await this.stopBrowser(name);
     }
 
-    return this.launchBrowser(name, requestedHeadless, requestedIgnoreHTTPSErrors, options);
+    return this.launchBrowser(
+      name,
+      requestedHeadless,
+      requestedIgnoreHTTPSErrors,
+      requestedChannel,
+      options
+    );
   }
 
   async autoConnect(name: string, options: BrowserOperationOptions = {}): Promise<BrowserEntry> {
@@ -356,6 +396,7 @@ export class BrowserManager {
           type: entry.type,
           status,
           pages: this.listNamedPages(entry),
+          ...(entry.channel ? { channel: entry.channel } : {}),
         };
       })
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -407,22 +448,29 @@ export class BrowserManager {
     name: string,
     headless: boolean,
     ignoreHTTPSErrors: boolean,
+    channel: BrowserChannel | undefined,
     operation: BrowserOperationOptions = {}
   ): Promise<BrowserEntry> {
     assertSafeBrowserName(name);
-    const profileDir = path.join(this.baseDir, name, "chromium-profile");
+    const profileDir = path.join(this.baseDir, name, profileDirName(channel));
     await this.dependencies.mkdir(profileDir, { recursive: true });
 
     const timeout = this.remainingOperationTimeout(operation);
-    const context = await this.dependencies.launchPersistentContext(profileDir, {
-      headless,
-      viewport: headless ? undefined : null,
-      ignoreHTTPSErrors,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      handleSIGHUP: false,
-      ...(timeout === undefined ? {} : { timeout }),
-    });
+    let context: BrowserContext;
+    try {
+      context = await this.dependencies.launchPersistentContext(profileDir, {
+        headless,
+        viewport: headless ? undefined : null,
+        ignoreHTTPSErrors,
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
+        ...(channel ? { channel } : {}),
+        ...(timeout === undefined ? {} : { timeout }),
+      });
+    } catch (error) {
+      throw wrapChannelLaunchError(channel, error);
+    }
     const browser = context.browser();
 
     try {
@@ -449,6 +497,7 @@ export class BrowserManager {
       profileDir,
       headless,
       ignoreHTTPSErrors,
+      ...(channel ? { channel } : {}),
     };
 
     this.attachBrowserLifecycle(entry);
